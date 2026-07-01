@@ -6,3 +6,6 @@ env/
 .env
 .vscode/
 .idea/
+node_modules/
+frontend/dist/
+frontend/node_modules/
