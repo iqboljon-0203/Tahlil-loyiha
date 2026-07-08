@@ -273,38 +273,38 @@ def generate_ai_insights(health_score, rul_days_vy, rul_days_vx, forecast_df, fe
     if rul_days_vy is not None:
         years = rul_days_vy / 365
         if years < 1:
-            insights.append(f"🚨 **Y-Axis Vibration** will hit critical limit in **{rul_days_vy} days** ({years:.1f} years). Urgent bearing inspection needed.")
+            insights.append(f"🚨 **Y-o'qi tebranishi** **{rul_days_vy} kundan** so'ng ({years:.1f} yil) xavfli chegaraga yetadi. Zudlik bilan podshipniklarni tekshirish kerak.")
         elif years < 3:
             q = ((rul_days_vy % 365) // 91) + 1
             y = pd.Timestamp.now().year + int(years)
-            insights.append(f"⚠️ **Y-Axis Vibration** projected to reach limit by **Q{q} {y}**. Schedule bearing replacement.")
+            insights.append(f"⚠️ **Y-o'qi tebranishi** **{y}-yil {q}-choragida** xavfli chegaraga yetishi kutilmoqda. Podshipniklarni almashtirishni rejalashtiring.")
         else:
-            insights.append(f"📊 **Y-Axis Vibration** expected to remain within limits for **{years:.1f} years**.")
+            insights.append(f"📊 **Y-o'qi tebranishi** keyingi **{years:.1f} yil** davomida me'yorda bo'lishi kutilmoqda.")
     else:
-        insights.append("📊 **Y-Axis Vibration** — No critical threshold breach predicted in forecast window.")
+        insights.append("📊 **Y-o'qi tebranishi** — Prognoz davrida xavfli chegaradan o'tish kutilmayapti.")
 
     if rul_days_vx is not None:
         years = rul_days_vx / 365
         if years < 2:
-            insights.append(f"⚠️ **X-Axis Vibration** approaching limit in **{years:.1f} years**. Monitor closely.")
+            insights.append(f"⚠️ **X-o'qi tebranishi** **{years:.1f} yilda** xavfli chegaraga yaqinlashadi. Doimiy nazorat qiling.")
 
     # Trend analysis
     if forecast_df is not None and 'T' in feature_cols and 'T' in forecast_df.columns:
         temp_trend = forecast_df['T'].iloc[-1] - forecast_df['T'].iloc[0]
         if temp_trend > 10:
-            insights.append("🌡️ **Temperature** shows rising trend. Check cooling system and lubrication.")
+            insights.append("🌡️ **Harorat** o'sish tendensiyasini ko'rsatmoqda. Sovutish tizimi va moylashni tekshiring.")
 
     if forecast_df is not None and 'Current' in feature_cols and 'Current' in forecast_df.columns:
         curr_trend = forecast_df['Current'].iloc[-1] - forecast_df['Current'].iloc[0]
         if curr_trend > 5:
-            insights.append("⚡ **Current draw** increasing — possible winding degradation or mechanical load increase.")
+            insights.append("⚡ **Tok sarfi** oshayapti — motor cho'lg'amida yoki mexanik yuklamada muammo bo'lishi mumkin.")
 
     # Maintenance recommendations
     if health_score < 70:
-        insights.append("\n**🔧 Recommended Actions:**")
-        insights.append("1. Perform detailed vibration spectrum analysis")
-        insights.append("2. Check bearing condition and lubrication")
-        insights.append("3. Inspect shaft alignment and balance")
-        insights.append("4. Review motor current signature for anomalies")
+        insights.append("\n**🔧 Tavsiya etiladigan choralar:**")
+        insights.append("1. Tebranish spektrini chuqur tahlil qilish")
+        insights.append("2. Podshipnik holati va moylanishini tekshirish")
+        insights.append("3. Valning markazlashuvi va balansini tekshirish")
+        insights.append("4. Dvigatelning tok sarfidagi o'zgarishlarni tekshirish")
 
     return insights
