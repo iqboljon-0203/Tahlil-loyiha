@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
 import numpy as np
 import io
+import os
 
 from backend.ai_engine import (
     clean_data, generate_synthetic_data, create_sample_data,
@@ -21,11 +22,11 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Industrial AI API", version="1.0.0")
 
-# Configure CORS for frontend access
+# Configure CORS — ruxsat berilgan domenlar
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allow all for now
-    allow_credentials=True,
+    allow_origins=["*"], # Barcha domenlarga ruxsat berish (Vercel uchun muammosiz)
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -114,7 +115,7 @@ async def run_forecast(
             if 'VXI' in forecast_df.columns:
                 rul_vx_days, _ = calculate_rul(forecast_df, 'VXI', vxahh)
 
-        insights = generate_ai_insights(health_score, rul_vy_days, rul_vx_days, forecast_df, feature_cols)
+        insights = generate_ai_insights(health_score, rul_vy_days, rul_vx_days, forecast_df, feature_cols, eq_type)
 
         # Formatting response
         if 'Time' in df.columns:
@@ -139,6 +140,7 @@ async def run_forecast(
             "forecast_data": forecast_data,
             "feature_cols": feature_cols,
             "forecast_horizon": forecast_years,
+            "eq_type": eq_type,
             "is_fallback": is_fallback
         }
 

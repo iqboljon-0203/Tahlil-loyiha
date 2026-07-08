@@ -57,6 +57,7 @@ function App() {
   // App State
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
 
   const handleFileChange = (e) => {
     if (e.target.files.length > 0) {
@@ -67,6 +68,7 @@ function App() {
 
   const runForecast = async () => {
     setLoading(true);
+    setError(null);
     try {
       const formData = new FormData();
       if (file && !useDemo) {
@@ -80,14 +82,17 @@ function App() {
       formData.append('vyahh', vyahh);
       formData.append('vxahh', vxahh);
 
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+      const apiUrl = import.meta.env.VITE_API_URL || '';
       const response = await axios.post(`${apiUrl}/api/forecast`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setResults(response.data);
       if(window.innerWidth < 768) setSidebarOpen(false); // auto close on mobile
-    } catch (error) {
-      alert("Error generating forecast: " + (error.response?.data?.detail || error.message));
+    } catch (err) {
+      const message = err.response?.data?.detail || err.message || "Noma'lum xatolik yuz berdi";
+      setError(message);
+      // 5 soniyadan keyin xato xabarini avtomatik yashirish
+      setTimeout(() => setError(null), 5000);
     } finally {
       setLoading(false);
     }
@@ -246,6 +251,19 @@ function App() {
              {loading ? "Sensorlar tahlil qilinmoqda..." : "AI prognozlashni boshlash"}
            </button>
         </div>
+
+        {error && (
+           <div className="alert danger" style={{maxWidth: '600px', margin: '0 auto 30px', animation: 'fadeInDown 0.4s ease-out'}}>
+             <AlertTriangle color="var(--danger)" />
+             <div style={{flex: 1}}>
+               <strong>Xatolik:</strong> {error}
+             </div>
+             <span 
+               onClick={() => setError(null)} 
+               style={{cursor: 'pointer', opacity: 0.7, fontSize: '1.2rem', lineHeight: 1}}
+             >✕</span>
+           </div>
+         )}
 
         {results && (
           <div className="dashboard-results">

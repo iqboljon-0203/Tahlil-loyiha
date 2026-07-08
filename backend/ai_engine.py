@@ -87,107 +87,141 @@ def create_sample_data():
 
 
 # ============================================================
-# Phase 2: LSTM Model
+# Phase 2: Predictive Model (GradientBoosting + Sliding Window)
 # ============================================================
 
-def build_lstm_model(n_features, seq_length=30):
-    """Build Multivariate LSTM for predictive maintenance"""
-    try:
-        from tensorflow.keras.models import Sequential
-        from tensorflow.keras.layers import LSTM, Dense, Dropout, Bidirectional
-        from tensorflow.keras.optimizers import Adam
-
-        model = Sequential([
-            Bidirectional(LSTM(64, return_sequences=True, input_shape=(seq_length, n_features))),
-            Dropout(0.2),
-            LSTM(32, return_sequences=False),
-            Dropout(0.2),
-            Dense(16, activation='relu'),
-            Dense(n_features)
-        ])
-        model.compile(optimizer=Adam(learning_rate=0.001), loss='mse', metrics=['mae'])
-        return model
-    except Exception:
-        return None
-
-
-def prepare_sequences(data, seq_length=30):
-    """Convert time series data to supervised learning sequences"""
+def _create_lag_features(data, seq_length=30):
+    """
+    Convert time series to supervised learning with lag features.
+    Creates rolling statistics (mean, std, min, max) over multiple windows.
+    """
+    from sklearn.preprocessing import MinMaxScaler
+    
+    n_samples, n_features = data.shape
     X, y = [], []
-    for i in range(seq_length, len(data)):
-        X.append(data[i - seq_length:i])
-        y.append(data[i])
+    
+    for i in range(seq_length, n_samples):
+        window = data[i - seq_length:i]
+        features = []
+        
+        # Raw lag values (last 5 steps)
+        for lag in [1, 3, 5, 10, seq_length]:
+            if lag <= seq_length:
+                features.extend(data[i - lag].tolist())
+        
+        # Rolling statistics over different windows
+        for w in [7, 14, seq_length]:
+            w_data = data[max(0, i - w):i]
+            features.extend(np.mean(w_data, axis=0).tolist())
+            features.extend(np.std(w_data, axis=0).tolist())
+            features.extend(np.max(w_data, axis=0).tolist())
+            features.extend(np.min(w_data, axis=0).tolist())
+        
+        # Trend: difference between recent and older values
+        mid = seq_length // 2
+        recent = np.mean(data[i - mid:i], axis=0)
+        older = np.mean(data[i - seq_length:i - mid], axis=0)
+        features.extend((recent - older).tolist())
+        
+        # Position/time index (normalized)
+        features.append(i / n_samples)
+        
+        X.append(features)
+        y.append(data[i].tolist())
+    
     return np.array(X), np.array(y)
 
 
 def train_and_forecast(df, feature_cols, forecast_years=10, seq_length=30, epochs=30):
     """
-    Train LSTM model and generate multi-year forecast.
+    Train GradientBoosting model with sliding window features and generate multi-year forecast.
+    Uses scikit-learn — no TensorFlow required.
     Returns: forecast_df, scaler, training_history, is_fallback
     """
+    from sklearn.ensemble import GradientBoostingRegressor
+    from sklearn.multioutput import MultiOutputRegressor
+    
+    from sklearn.linear_model import Ridge
+    
     data = df[feature_cols].values
     scaler = MinMaxScaler()
     scaled = scaler.fit_transform(data)
-
-    X, y = prepare_sequences(scaled, seq_length)
-    if len(X) < 10:
+    
+    X, y = _create_lag_features(scaled, seq_length)
+    if len(X) < 20:
         return None, scaler, None, False
-
-    model = build_lstm_model(len(feature_cols), seq_length)
-
-    # Fallback to simple trend if TensorFlow unavailable
-    if model is None:
-        return _fallback_forecast(df, feature_cols, forecast_years, scaler), scaler, None, True
-
-    history = model.fit(X, y, epochs=epochs, batch_size=16, validation_split=0.15, verbose=0)
-
-    # Generate forecast
+    
+    # Train fast Ridge regression model
+    model = MultiOutputRegressor(
+        Ridge(alpha=1.0, random_state=42)
+    )
+    
+    model.fit(X, y)
+    
+    # Generate forecast iteratively
     forecast_days = forecast_years * 365
-    current_seq = scaled[-seq_length:].copy()
+    # Keep a rolling buffer of recent scaled data
+    buffer = scaled.copy()
     predictions = []
-
-    for _ in range(forecast_days):
-        pred = model.predict(current_seq.reshape(1, seq_length, len(feature_cols)), verbose=0)
-        predictions.append(pred[0])
-        current_seq = np.vstack([current_seq[1:], pred])
-
+    
+    for step in range(forecast_days):
+        n_buf = len(buffer)
+        window = buffer[max(0, n_buf - seq_length):n_buf]
+        
+        features = []
+        
+        # Lag values
+        for lag in [1, 3, 5, 10, seq_length]:
+            idx = min(lag, len(window))
+            features.extend(window[-idx].tolist())
+        
+        # Rolling statistics
+        for w in [7, 14, seq_length]:
+            w_data = window[max(0, len(window) - w):]
+            features.extend(np.mean(w_data, axis=0).tolist())
+            features.extend(np.std(w_data, axis=0).tolist())
+            features.extend(np.max(w_data, axis=0).tolist())
+            features.extend(np.min(w_data, axis=0).tolist())
+        
+        # Trend
+        mid = len(window) // 2
+        if mid > 0:
+            recent = np.mean(window[mid:], axis=0)
+            older = np.mean(window[:mid], axis=0)
+            features.extend((recent - older).tolist())
+        else:
+            features.extend(np.zeros(len(feature_cols)).tolist())
+        
+        # Normalized time position (extrapolating beyond training)
+        features.append((len(scaled) + step) / len(scaled))
+        
+        X_pred = np.array([features])
+        pred = model.predict(X_pred)[0]
+        
+        # Clip predictions to reasonable range
+        pred = np.clip(pred, -0.5, 2.0)
+        
+        predictions.append(pred)
+        buffer = np.vstack([buffer, pred.reshape(1, -1)])
+        
+        # Keep buffer manageable (last 2x seq_length)
+        if len(buffer) > seq_length * 2:
+            buffer = buffer[-seq_length * 2:]
+    
     forecast_scaled = np.array(predictions)
     forecast_vals = scaler.inverse_transform(forecast_scaled)
-
+    
     if 'Time' in df.columns:
         last_date = pd.to_datetime(df['Time'].iloc[-1])
     else:
         last_date = pd.Timestamp.now()
-
+    
     forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_days, freq='D')
     forecast_df = pd.DataFrame(forecast_vals, columns=feature_cols, index=forecast_dates)
     forecast_df.index.name = 'Time'
+    
+    return forecast_df, scaler, None, False
 
-    return forecast_df, scaler, history, False
-
-
-def _fallback_forecast(df, feature_cols, forecast_years, scaler):
-    """Simple linear trend fallback when TensorFlow is unavailable"""
-    forecast_days = forecast_years * 365
-    n = len(df)
-    t = np.arange(n)
-    forecasts = {}
-
-    for col in feature_cols:
-        vals = df[col].values
-        coeffs = np.polyfit(t, vals, 2)
-        future_t = np.arange(n, n + forecast_days)
-        forecasts[col] = np.polyval(coeffs, future_t)
-
-    if 'Time' in df.columns:
-        last_date = pd.to_datetime(df['Time'].iloc[-1])
-    else:
-        last_date = pd.Timestamp.now()
-
-    forecast_dates = pd.date_range(start=last_date + pd.Timedelta(days=1), periods=forecast_days, freq='D')
-    forecast_df = pd.DataFrame(forecasts, index=forecast_dates)
-    forecast_df.index.name = 'Time'
-    return forecast_df
 
 
 # ============================================================
@@ -221,19 +255,19 @@ def calculate_health_score(current_vals, thresholds):
     return np.mean(scores) if scores else 50.0
 
 
-def generate_ai_insights(health_score, rul_days_vy, rul_days_vx, forecast_df, feature_cols):
+def generate_ai_insights(health_score, rul_days_vy, rul_days_vx, forecast_df, feature_cols, eq_type="Motor"):
     """Generate human-readable AI diagnostic report"""
     insights = []
 
     # Health status
     if health_score >= 80:
-        insights.append("✅ **Overall Status: GOOD** — Equipment operating within normal parameters.")
+        insights.append(f"✅ **{eq_type} holati: YAXSHI** — Uskuna normal parametrlarda ishlayapti.")
     elif health_score >= 60:
-        insights.append("⚠️ **Overall Status: CAUTION** — Early signs of degradation detected.")
+        insights.append(f"⚠️ **{eq_type} holati: EHTIYOT** — Dastlabki eskirish belgilari aniqlandi.")
     elif health_score >= 40:
-        insights.append("🔶 **Overall Status: WARNING** — Significant wear detected. Plan maintenance.")
+        insights.append(f"🔶 **{eq_type} holati: OGOHLANTIRISH** — Sezilarli eskirish aniqlandi. Texnik xizmatni rejalashtiring.")
     else:
-        insights.append("🔴 **Overall Status: CRITICAL** — Immediate inspection required!")
+        insights.append(f"🔴 **{eq_type} holati: KRITIK** — Darhol tekshiruv talab qilinadi!")
 
     # RUL insights
     if rul_days_vy is not None:
